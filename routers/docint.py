@@ -5,6 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timezone
 import uuid
+from urllib.parse import urlparse
 
 router = APIRouter(prefix="/docint", tags=["docint"])
 
@@ -25,7 +26,8 @@ def extract_result_id(operation_location: str) -> str:
     Pl.: .../documentModels/prebuilt-invoice/analyzeResults/<RESULT_ID>
     """
     try:
-        return operation_location.rstrip("/").split("/")[-1]
+        path = urlparse(operation_location).path
+        return path.rstrip("/").split("/")[-1]
     except:
         return ""
 
@@ -125,10 +127,10 @@ async def start_invoice_batch(request: Request):
         "azureBlobSource": {
             "containerUrl": get_container_url(account, source_container),
             # prefix opcionális – ha üres, a konténer teljes tartalmát veszi
-            **({"prefix": prefix} if prefix else {}),
+            # **({"prefix": prefix} if prefix else {}),
         },
         "resultContainerUrl": get_container_url(account, result_container),
-        "resultPrefix": prefix or "",  # te döntöd el, akarod-e ugyanazt a prefixet
+        "resultPrefix": prefix,  # te döntöd el, akarod-e ugyanazt a prefixet
         "overwriteExisting": True,
     }
 
@@ -164,4 +166,5 @@ async def start_invoice_batch(request: Request):
         "sourceContainer": source_container,
         "resultContainer": result_container,
         "prefix": prefix,
+        "docIntRequest": body,
     }
