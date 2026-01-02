@@ -1,0 +1,70 @@
+# --- Secrets / environment ---
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.key
+*.crt
+
+# --- Virtual environments ---
+.venv/
+venv/
+ENV/
+env/
+.conda/
+__pypackages__/
+
+# --- Python cache / compiled ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Logs ---
+*.log
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# PyCharm
+.idea/
+
+# --- Testing / coverage ---
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# --- Packaging / build ---
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Mypy / type checking ---
+.mypy_cache/
+.pyre/
+.pytype/
+.dmypy.json
+
+# --- FastAPI / Uvicorn ---
+*.pid
+
+# --- Azure / deployment artifacts (optional) ---
+# If you later create deployment ZIPs or local publish folders:
+*.zip
+.publish/
