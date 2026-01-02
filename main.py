@@ -5,7 +5,7 @@ load_dotenv(override=True)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import upload
+from routers import docint, upload
 
 app = FastAPI()
 
@@ -24,3 +24,4 @@ app.add_middleware(
 )
 
 app.include_router(upload.router, prefix="/api/v1")
+app.include_router(docint.router, prefix="/api/v1")
