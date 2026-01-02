@@ -35,19 +35,6 @@ def slugify_filename(name: str) -> str:
     return name or "file"
 
 
-@router.post("/echo")
-async def echo(request: Request):
-    data = await request.json()  # vár: {"message": "..."}
-    message = data.get("message")
-
-    if not message:
-        raise HTTPException(status_code=400, detail="Hiányzik a 'message' mező.")
-
-    print(f"[ECHO] {message}")
-
-    return {"ok": True, "received": message}
-
-
 @router.post("/invoice")
 async def upload_invoice(request: Request):
 
