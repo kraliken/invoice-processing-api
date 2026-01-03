@@ -61,37 +61,10 @@ async def start_invoice_batch(request: Request):
 
     Várt kérés (Flow-ból):
     - Header: x-flow-secret: <shared secret>
-    - Body (opcionális):
-        {
-          "prefix": "2026-01-02/run-001"
-        }
-
-    A prefix arra jó, hogy a konténeren belül csak egy "mappát"/prefixet dolgozz fel.
     """
 
     # 1) Egyszerű védelem: ha nincs / hibás a secret, azonnal leállunk
     require_flow_secret(request)
-
-    # 2) Beolvassuk a JSON body-t, HA application/json a content-type.
-    #    (Ha üres body-val hívod, akkor data üres dict lesz.)
-    data = (
-        await request.json()
-        if request.headers.get("content-type", "").startswith("application/json")
-        else {}
-    )
-
-    # prefix: opcionális, whitespace-t levágjuk
-    prefix = (data.get("prefix") or "").strip()
-
-    # Ha a Flow nem küld prefixet, generálunk egy ütközésbiztosat:
-    if not prefix:
-        date_part = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        prefix = f"{date_part}/run-{uuid.uuid4()}"
-
-    # 3) Prefix validálás (opcionális, de hasznos):
-    #    csak betű, szám, _, -, / engedett, hogy ne legyen "furcsa" path vagy karakter.
-    if prefix and not re.fullmatch(r"[A-Za-z0-9_\-\/]+", prefix):
-        raise HTTPException(400, "Érvénytelen prefix formátum.")
 
     # 4) Konfiguráció beolvasása környezeti változókból
     endpoint = (os.getenv("DOCINT_ENDPOINT") or "").rstrip("/")
@@ -121,16 +94,12 @@ async def start_invoice_batch(request: Request):
     # - azureBlobSource.containerUrl: input konténer URL
     # - azureBlobSource.prefix: csak akkor tesszük bele, ha van prefix
     # - resultContainerUrl: output konténer URL
-    # - resultPrefix: output "mappa" a result konténeren belül
     # - overwriteExisting: felülírja a meglévő result fájlokat ugyanazzal a prefixxel
     body = {
         "azureBlobSource": {
             "containerUrl": get_container_url(account, source_container),
-            # prefix opcionális – ha üres, a konténer teljes tartalmát veszi
-            # **({"prefix": prefix} if prefix else {}),
         },
         "resultContainerUrl": get_container_url(account, result_container),
-        "resultPrefix": prefix,  # te döntöd el, akarod-e ugyanazt a prefixet
         "overwriteExisting": True,
     }
 
@@ -165,6 +134,5 @@ async def start_invoice_batch(request: Request):
         "resultId": result_id,
         "sourceContainer": source_container,
         "resultContainer": result_container,
-        "prefix": prefix,
         "docIntRequest": body,
     }
