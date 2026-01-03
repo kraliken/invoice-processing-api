@@ -57,16 +57,45 @@ def require_flow_secret(request: Request):
         raise HTTPException(401, "Unauthorized")
 
 
-def extract_field_value(field: dict):
-    """
-    Document Intelligence field -> emberi érték
-    """
-    if not field:
-        return None
-    for key in ("content", "valueString", "valueNumber", "valueDate"):
-        if key in field:
-            return field[key]
-    return None
+# ---- helpers ----
+def safe_get(d: dict, *keys, default=None):
+    cur = d
+    for k in keys:
+        if not isinstance(cur, dict) or k not in cur:
+            return default
+        cur = cur[k]
+    return cur
+
+
+def get_field(fields: dict, field_name: str) -> dict:
+    # DI fields: {"InvoiceId": {...}, ...}
+    if not isinstance(fields, dict):
+        return {}
+    v = fields.get(field_name)
+    return v if isinstance(v, dict) else {}
+
+
+def get_confidence(field: dict):
+    c = field.get("confidence")
+    return c if isinstance(c, (int, float)) else None
+
+
+def get_value_string(field: dict):
+    # invoice id, tax id, recipients typically valueString
+    return field.get("valueString") or ""
+
+
+def get_value_date(field: dict):
+    # dates typically valueDate (YYYY-MM-DD)
+    return field.get("valueDate") or ""
+
+
+def get_value_currency_amount(field: dict):
+    return safe_get(field, "valueCurrency", "amount", default="") or ""
+
+
+def get_value_currency_code(field: dict):
+    return safe_get(field, "valueCurrency", "currencyCode", default="") or ""
 
 
 @router.post("/batch/start")
@@ -167,52 +196,108 @@ def export_invoices_to_excel():
     bsc = BlobServiceClient.from_connection_string(CONN_STR)
     container = bsc.get_container_client(RESULT_CONTAINER)
 
-    rows = []
-    all_columns = set()
+    headers = [
+        "InvoiceId",
+        "InvoiceId_confidence",
+        "VendorAddressRecipient",
+        "VendorAddressRecipient_confidence",
+        "VendorTaxId",
+        "VendorTaxId_confidence",
+        "CustomerAddressRecipient",
+        "CustomerAddressRecipient_confidence",
+        "CustomerTaxId",
+        "CustomerTaxId_confidence",
+        "InvoiceDate",
+        "InvoiceDate_confidence",
+        "DueDate",
+        "DueDate_confidence",
+        "InvoiceTotal_amount",
+        "InvoiceTotal_currencyCode",
+        "InvoiceTotal_confidence",
+        "SubTotal_amount",
+        "SubTotal_currencyCode",
+        "SubTotal_confidence",
+        "TotalTax_amount",
+        "TotalTax_currencyCode",
+        "TotalTax_confidence",
+    ]
 
-    # 1) Összes JSON blob beolvasása
+    rows = []
+
     for blob in container.list_blobs():
         if not blob.name.lower().endswith(".json"):
             continue
 
-        data = container.get_blob_client(blob.name).download_blob().readall()
-        doc = json.loads(data)
+        raw = container.get_blob_client(blob.name).download_blob().readall()
+        doc = json.loads(raw)
 
-        documents = doc.get("analyzeResult", {}).get("documents", [])
+        documents = safe_get(doc, "analyzeResult", "documents", default=[])
         if not documents:
+            # ha valamiért nincs documents tömb, akkor kihagyjuk
             continue
 
-        fields = documents[0].get("fields", {})
-        row = {}
+        fields = documents[0].get("fields") or {}
 
-        for field_name, field_value in fields.items():
-            value = extract_field_value(field_value)
-            row[field_name] = value
-            all_columns.add(field_name)
+        # string fields
+        invoice_id = get_field(fields, "InvoiceId")
+        vendor_addr_rec = get_field(fields, "VendorAddressRecipient")
+        vendor_tax = get_field(fields, "VendorTaxId")
+        cust_addr_rec = get_field(fields, "CustomerAddressRecipient")
+        cust_tax = get_field(fields, "CustomerTaxId")
+
+        # date fields
+        invoice_date = get_field(fields, "InvoiceDate")
+        due_date = get_field(fields, "DueDate")
+
+        # currency fields
+        invoice_total = get_field(fields, "InvoiceTotal")
+        sub_total = get_field(fields, "SubTotal")
+        total_tax = get_field(fields, "TotalTax")
+
+        row = [
+            get_value_string(invoice_id),
+            get_confidence(invoice_id) or "",
+            get_value_string(vendor_addr_rec),
+            get_confidence(vendor_addr_rec) or "",
+            get_value_string(vendor_tax),
+            get_confidence(vendor_tax) or "",
+            get_value_string(cust_addr_rec),
+            get_confidence(cust_addr_rec) or "",
+            get_value_string(cust_tax),
+            get_confidence(cust_tax) or "",
+            get_value_date(invoice_date),
+            get_confidence(invoice_date) or "",
+            get_value_date(due_date),
+            get_confidence(due_date) or "",
+            get_value_currency_amount(invoice_total),
+            get_value_currency_code(invoice_total),
+            get_confidence(invoice_total) or "",
+            get_value_currency_amount(sub_total),
+            get_value_currency_code(sub_total),
+            get_confidence(sub_total) or "",
+            get_value_currency_amount(total_tax),
+            get_value_currency_code(total_tax),
+            get_confidence(total_tax) or "",
+        ]
 
         rows.append(row)
 
     if not rows:
-        raise HTTPException(404, "No invoice JSON files found")
+        raise HTTPException(404, "No invoice JSON files found in result container")
 
-    # 2) Excel összeállítása
     wb = Workbook()
     ws = wb.active
     ws.title = "Invoices"
+    ws.append(headers)
+    for r in rows:
+        ws.append(r)
 
-    columns = sorted(all_columns)
-    ws.append(columns)
-
-    for row in rows:
-        ws.append([row.get(col) for col in columns])
-
-    # 3) Excel stream visszaadása
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
 
     return StreamingResponse(
-        output,
+        out,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=invoices.xlsx"},
     )
