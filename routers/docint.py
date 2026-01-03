@@ -1,10 +1,13 @@
 import os
-import re
 import secrets
+from fastapi.responses import StreamingResponse
+from azure.storage.blob import BlobServiceClient
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from datetime import datetime, timezone
-import uuid
+from openpyxl import Workbook
+from io import BytesIO
+import json
+
 from urllib.parse import urlparse
 
 router = APIRouter(prefix="/docint", tags=["docint"])
@@ -52,6 +55,18 @@ def require_flow_secret(request: Request):
     # Timing-safe összehasonlítás (ne lehessen időzítés alapján tippelni):
     if not provided or not secrets.compare_digest(provided, expected):
         raise HTTPException(401, "Unauthorized")
+
+
+def extract_field_value(field: dict):
+    """
+    Document Intelligence field -> emberi érték
+    """
+    if not field:
+        return None
+    for key in ("content", "valueString", "valueNumber", "valueDate"):
+        if key in field:
+            return field[key]
+    return None
 
 
 @router.post("/batch/start")
@@ -136,3 +151,68 @@ async def start_invoice_batch(request: Request):
         "resultContainer": result_container,
         "docIntRequest": body,
     }
+
+
+@router.get("/export/excel")
+def export_invoices_to_excel():
+
+    RESULT_CONTAINER = os.getenv(
+        "AZURE_STORAGE_RESULT_CONTAINER", "invoicebatch-result"
+    )
+    CONN_STR = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+
+    if not CONN_STR:
+        raise HTTPException(500, "AZURE_STORAGE_CONNECTION_STRING not set")
+
+    bsc = BlobServiceClient.from_connection_string(CONN_STR)
+    container = bsc.get_container_client(RESULT_CONTAINER)
+
+    rows = []
+    all_columns = set()
+
+    # 1) Összes JSON blob beolvasása
+    for blob in container.list_blobs():
+        if not blob.name.lower().endswith(".json"):
+            continue
+
+        data = container.get_blob_client(blob.name).download_blob().readall()
+        doc = json.loads(data)
+
+        documents = doc.get("analyzeResult", {}).get("documents", [])
+        if not documents:
+            continue
+
+        fields = documents[0].get("fields", {})
+        row = {}
+
+        for field_name, field_value in fields.items():
+            value = extract_field_value(field_value)
+            row[field_name] = value
+            all_columns.add(field_name)
+
+        rows.append(row)
+
+    if not rows:
+        raise HTTPException(404, "No invoice JSON files found")
+
+    # 2) Excel összeállítása
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Invoices"
+
+    columns = sorted(all_columns)
+    ws.append(columns)
+
+    for row in rows:
+        ws.append([row.get(col) for col in columns])
+
+    # 3) Excel stream visszaadása
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=invoices.xlsx"},
+    )
